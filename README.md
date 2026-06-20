@@ -1,7 +1,24 @@
-# Puzzle-135 Kangaroo (Apple Silicon, pure CPU)
+# GREENROO — CPU + Metal GPU Kangaroo (Apple Silicon)
 
 A distinguished-point Pollard kangaroo interval-ECDLP solver for secp256k1,
-hand-built and tuned for the M4 (4 P-core + 6 E-core, 16 GB), no GPU.
+hand-built and tuned for the M4. Runs the **CPU (10 cores) and the Metal GPU
+together** as one engine, sharing a single distinguished-point net — either can
+land the collision. Live green dashboard.
+
+Measured: CPU ~80 M/s + GPU ~130 M/s = **~200+ million keys/sec combined**.
+Validated end-to-end on a real solved puzzle (#40 — recovered the exact
+published private key).
+
+```
+  ┌─ GREENROO ──────────────────── PUZZLE #135 ─┐
+  │ uptime 13s
+  │ CPU 10 cores     73 M/s ███████░░░░░
+  │ GPU 524288 roos 133 M/s ████████████
+  │ TOTAL      206 M keys/sec
+  │ checked  1.68 billion
+  │ DP net   59 markers
+  └────────────────────────────────────────────┘
+```
 
 ## Purpose & honest scope
 This is an educational, readable, correctly-validated CPU implementation, aimed

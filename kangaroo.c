@@ -14,7 +14,9 @@
 #include <pthread.h>
 #include <time.h>
 #include <signal.h>
+#include <unistd.h>
 #include "group.h"
+#include "gpu_bridge.h"
 
 /* ---------- 256-bit scalar helpers ---------- */
 static const uint64_t ORDER_N[4] = {
@@ -64,8 +66,10 @@ typedef struct {
     volatile int solved;
     sc       answer;
     /* stats */
-    volatile uint64_t total_jumps;
+    volatile uint64_t total_jumps;   /* CPU jumps */
+    volatile uint64_t gpu_jumps;     /* GPU jumps */
     volatile uint64_t dp_count;  /* distinguished points stored ("net markers") */
+    int gpu_kangaroos;           /* reported by the GPU engine once up */
     int do_ckpt;
     volatile int stop_req;       /* set by SIGINT/SIGTERM for graceful save+exit */
 } ctx_t;
@@ -117,6 +121,40 @@ static int dp_insert(const fe *x, const sc *dist, uint8_t type, sc *out_key){
     }
     pthread_mutex_unlock(&C.lock);
     return found;
+}
+
+/* ===================== GPU bridge ===================== */
+/* fe/sc (4x u64) <-> gpu limbs (8x u32) */
+static void fe_to_gpu(const fe*a,uint32_t*g){ for(int i=0;i<4;i++){ g[2*i]=(uint32_t)a->n[i]; g[2*i+1]=(uint32_t)(a->n[i]>>32);} }
+static void sc_to_gpu(const sc*a,uint32_t*g){ for(int i=0;i<4;i++){ g[2*i]=(uint32_t)a->n[i]; g[2*i+1]=(uint32_t)(a->n[i]>>32);} }
+static void gpu_to_fe(const uint32_t*g,fe*a){ for(int i=0;i<4;i++) a->n[i]=((uint64_t)g[2*i])|(((uint64_t)g[2*i+1])<<32);}
+
+int  bridge_njump(void){ return C.njump; }
+void bridge_jump(int i,uint32_t*jx,uint32_t*jy,uint32_t*jd){ fe_to_gpu(&C.jx[i],jx); fe_to_gpu(&C.jy[i],jy); sc_to_gpu(&C.jd[i],jd); }
+void bridge_target(uint32_t*tx,uint32_t*ty){ fe_to_gpu(&C.target.x,tx); fe_to_gpu(&C.target.y,ty); }
+void bridge_qshift(uint32_t*qx,uint32_t*qy){ fe_to_gpu(&C.Qshift.x,qx); fe_to_gpu(&C.Qshift.y,qy); }
+void bridge_rangeL(uint32_t*l){ sc_to_gpu(&C.rangeL,l); }
+int  bridge_dpbits(void){ return C.dpbits; }
+int  bridge_wbits(void){ return C.wbits; }
+int  bridge_solved(void){ return C.solved || C.stop_req; }
+void bridge_add_jumps(uint64_t n){ __sync_fetch_and_add(&C.gpu_jumps,n); }
+void bridge_set_kangaroos(int n){ C.gpu_kangaroos=n; }
+
+/* feed one GPU-found DP into the shared table; 1 if it solved */
+int bridge_feed_dp(const uint32_t*x8,const uint32_t*d8,uint8_t type){
+    fe x; gpu_to_fe(x8,&x); sc dist; gpu_to_fe(d8,(fe*)&dist);
+    sc q;
+    if(dp_insert(&x,&dist,type,&q)){
+        sc k; sc_add(&k,&C.rangeL,&q);
+        ge T; ge_scalar_base(&T,&k);
+        if(fe_equal(&T.x,&C.target.x)&&fe_equal(&T.y,&C.target.y)){
+            pthread_mutex_lock(&C.lock);
+            if(!C.solved){ C.solved=1; C.answer=k; }
+            pthread_mutex_unlock(&C.lock);
+            return 1;
+        }
+    }
+    return 0;
 }
 
 /* ---------- jump-table setup ---------- */
@@ -268,29 +306,95 @@ static int load_checkpoint(void){
     return 1;
 }
 
+/* ===================== GREENROO green dashboard ===================== */
+#define CG  "\033[92m"   /* bright green */
+#define CGD "\033[32m"   /* green */
+#define CB  "\033[1m"    /* bold */
+#define CD  "\033[2m"    /* dim */
+#define CR  "\033[0m"    /* reset */
+
+static void short_target(char*out,int n){
+    char h[65]; fe_get_hex(&C.target.x,h);
+    snprintf(out,n,"%.10s…%s",h,h+54);
+}
+static void dash_banner(void){
+    fprintf(stderr,"\n"
+      CG CB "    ╔═══════════════════════════════════════════════════╗\n" CR
+      CG CB "    ║   ▄▖▖   " CR CG "G R E E N R O O" CB "                          ║\n" CR
+      CG CB "    ║  ▐▌▌▌   " CR CGD "secp256k1 ECDLP kangaroo hunter" CB "        ║\n" CR
+      CG CB "    ║   ▘▝▘   " CR CGD "Apple Silicon · CPU + Metal GPU" CB "        ║\n" CR
+      CG CB "    ╚═══════════════════════════════════════════════════╝\n" CR "\n");
+}
+static int g_dash_lines=0;
+static int g_threads=0;
+static void bar(char*out,double v,double mx){
+    int f=(mx>0)?(int)(12.0*v/mx+0.5):0; if(f>12)f=12; if(f<0)f=0;
+    int k=0; for(int i=0;i<12;i++){ const char*c=(i<f)?"█":"░";
+        out[k++]=c[0]; out[k++]=c[1]; out[k++]=c[2]; } out[k]=0;
+}
+static void dash_render(int tty,double el,double cpu_r,double gpu_r){
+    uint64_t total=C.total_jumps+C.gpu_jumps;
+    double tot_r=cpu_r+gpu_r, mx=(cpu_r>gpu_r)?cpu_r:gpu_r;
+    char tb[40],kb[40],tgt[64],cbar[40],gbar[40],groo[32];
+    fmt_time(el,tb); fmt_count((double)total,kb); short_target(tgt,sizeof tgt);
+    bar(cbar,cpu_r,mx); bar(gbar,gpu_r,mx);
+    if(C.gpu_kangaroos>0) snprintf(groo,sizeof groo,"%d roos",C.gpu_kangaroos);
+    else                  snprintf(groo,sizeof groo,"seeding…");
+    if(!tty){
+        fprintf(stderr,"[%s] CPU %.0f + GPU %.0f = %.0f M/s | %s keys | net %llu\n",
+                tb,cpu_r,gpu_r,tot_r,kb,(unsigned long long)C.dp_count);
+        return;
+    }
+    if(g_dash_lines) fprintf(stderr,"\033[%dA",g_dash_lines);
+    int L=0;
+    #define DL(...) do{ fprintf(stderr,"\033[2K"); fprintf(stderr,__VA_ARGS__); fprintf(stderr,"\n"); L++; }while(0)
+    DL(CG CB "  ┌─ GREENROO ──────────────────── PUZZLE #%d ─┐" CR, C.wbits+1);
+    DL(CG "  │ " CR CD "target " CR CG "%s" CR, tgt);
+    DL(CG "  │ " CR CD "range  " CR CGD "2^%d … 2^%d-1" CR, C.wbits, C.wbits+1);
+    DL(CG "  │" CR);
+    DL(CG "  │ " CR CD "uptime " CR CB "%s" CR, tb);
+    DL(CG "  │ " CR "CPU " CD "%2d cores  " CR CB CG "%4.0f" CR " M/s " CGD "%s" CR, g_threads, cpu_r, cbar);
+    DL(CG "  │ " CR "GPU " CD "%-9s " CR CB CG "%4.0f" CR " M/s " CGD "%s" CR, groo, gpu_r, gbar);
+    DL(CG "  │" CR);
+    DL(CG "  │ " CR CB "TOTAL    " CR CB CG "%5.0f" CR CB " M keys/sec" CR, tot_r);
+    DL(CG "  │ " CR CD "checked  " CR "%s" , kb);
+    DL(CG "  │ " CR CD "DP net   " CR "%llu markers", (unsigned long long)C.dp_count);
+    DL(CG CB "  └────────────────────────────────────────────┘" CR);
+    #undef DL
+    g_dash_lines=L;
+    fflush(stderr);
+}
+
 /* ---------- driver ---------- */
 static void run(int threads){
     pthread_t th[64]; targ_t ta[64];
     uint64_t base_seed = 0xB5297A4D1F2E3C6BULL;
     for(int i=0;i<threads;i++){ ta[i].id=i; ta[i].threads=threads; ta[i].seed=base_seed; }
     struct timespec t0; clock_gettime(CLOCK_MONOTONIC,&t0);
+    g_threads=threads;
     for(int i=0;i<threads;i++) pthread_create(&th[i],NULL,worker,&ta[i]);
 
-    /* progress monitor */
+    int tty=isatty(2);
+    dash_banner();
+    if(tty) fprintf(stderr,"\033[?25l");        /* hide cursor */
+
     int tick=0; int ckpt_sec=120;
     { const char *e=getenv("CKPT_SEC"); if(e){ int v=atoi(e); if(v>0) ckpt_sec=v; } }
+    uint64_t pc=0,pg=0; double pel=0;
     while(!C.solved && !C.stop_req){
         struct timespec ts={1,0}; nanosleep(&ts,NULL);
         struct timespec t1; clock_gettime(CLOCK_MONOTONIC,&t1);
         double el=(t1.tv_sec-t0.tv_sec)+(t1.tv_nsec-t0.tv_nsec)/1e9;
-        uint64_t j=C.total_jumps;
-        char jb[40],tb[40];
-        fmt_count((double)j,jb); fmt_time(el,tb);
-        fprintf(stderr,"\r  running %s  |  checked %s keys  |  speed %.0f million/sec  |  net %llu markers       ",
-                tb,jb,j/el/1e6,(unsigned long long)C.dp_count);
+        uint64_t cj=C.total_jumps, gj=C.gpu_jumps;
+        double dt=el-pel; if(dt<0.1)dt=1.0;
+        double cr=(double)(cj-pc)/dt/1e6, gr=(double)(gj-pg)/dt/1e6;
+        pc=cj; pg=gj; pel=el;
+        if(tty) dash_render(1,el,cr,gr);
+        else if(tick%10==0) dash_render(0,el,cr,gr);
         if(C.do_ckpt && (++tick % ckpt_sec)==0) save_checkpoint();
         if(C.solved || C.stop_req) break;
     }
+    if(tty) fprintf(stderr,"\033[?25h");        /* show cursor */
     if(C.stop_req && C.do_ckpt){ fprintf(stderr,"\nstop requested - saving checkpoint...\n"); save_checkpoint(); }
     for(int i=0;i<threads;i++) pthread_join(th[i],NULL);
     if(C.do_ckpt) save_checkpoint();
@@ -375,7 +479,10 @@ int main(int argc,char**argv){
         C.do_ckpt=1;
         load_checkpoint();                     /* resume if checkpoint.bin matches */
         signal(SIGINT,on_signal); signal(SIGTERM,on_signal);   /* graceful stop */
+        pthread_t gth; int gpu_on=0;
+        if(!getenv("NOGPU")){ if(pthread_create(&gth,NULL,gpu_thread,NULL)==0) gpu_on=1; }
         run(threads);
+        if(gpu_on) pthread_join(gth,NULL);
         if(!C.solved){
             fprintf(stderr,"stopped without solving - progress is in checkpoint.bin (resume by relaunching)\n");
             return 0;

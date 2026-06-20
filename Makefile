@@ -1,13 +1,15 @@
 CC      = clang
-CFLAGS  = -O3 -march=native -funroll-loops -flto -Wall -Wno-unused-function
+CFLAGS  = -O3 -march=native -funroll-loops -Wall -Wno-unused-function
 INC     = -I/opt/homebrew/include
 LIB     = -L/opt/homebrew/lib -lsecp256k1
 PTH     = -lpthread
+GPU     = -framework Metal -framework Foundation
 
 all: kangaroo test_field test_group
 
-kangaroo: kangaroo.c field.h group.h
-	$(CC) $(CFLAGS) -o kangaroo kangaroo.c $(PTH)
+# GREENROO: fused CPU + Metal GPU bot
+kangaroo: kangaroo.c gpu_driver.m field.h group.h gpu_bridge.h gpu_field.metal
+	$(CC) $(CFLAGS) -o kangaroo kangaroo.c gpu_driver.m $(GPU) $(PTH)
 
 test_field: test_field.c field.h
 	$(CC) $(CFLAGS) -o test_field test_field.c
