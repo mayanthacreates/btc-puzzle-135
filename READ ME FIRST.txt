@@ -1,0 +1,45 @@
+==========================================================
+  PUZZLE-135 BOT  -  HOW TO USE  (Apple Silicon Mac)
+==========================================================
+
+FIRST TIME ON THIS MAC
+----------------------
+1. Double-click:  SETUP this Mac.command
+   (installs what's needed and builds the bot - run this once)
+
+
+EVERY DAY
+---------
+2. Double-click:  START puzzle 135.command
+      -> the bot starts and shows live progress.
+      -> you can close that window; it keeps running.
+
+3. Double-click:  STOP puzzle 135.command
+      -> stops the bot and saves progress.
+      -> next START continues where it left off.
+
+
+WHAT THE SCREEN SHOWS
+---------------------
+   running 2h 14m | checked 10.85 billion keys | speed 75 million/sec | net 18000 markers
+
+   running ......... how long it's been going
+   checked ......... total keys tried so far (only goes up)
+   speed ........... how fast right now (normal is ~73-80 million/sec)
+   net markers ..... trip-wires saved in memory (a collision = the key)
+
+
+IF IT EVER FINDS THE KEY
+------------------------
+   A big "KEY FOUND!" banner appears AND the key is written to
+   a file called  FOUND.txt  in this folder. You won't miss it.
+
+
+NOTES
+-----
+- Honest expectation: this runs correctly and fast, but puzzle 135 is
+  astronomically hard. The bot working is not the same as 135 being
+  reachable. It will, however, solve smaller puzzles if pointed at them.
+- Progress is saved every 2 minutes (file: checkpoint.bin).
+- Each Mac runs its own separate search; progress does not sync.
+==========================================================

@@ -1,0 +1,13 @@
+# compiled binaries (rebuild with `make` on each machine)
+kangaroo
+test_field
+test_group
+*.o
+*.dSYM/
+
+# runtime state - never publish these
+checkpoint.bin
+checkpoint.tmp
+FOUND.txt
+run-135.log
+run-135.pid
