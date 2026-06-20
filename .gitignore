@@ -3,6 +3,7 @@ kangaroo
 test_field
 test_group
 gpu_test
+gpu_solve
 *.air
 *.metallib
 *.o

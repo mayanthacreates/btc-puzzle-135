@@ -133,6 +133,108 @@ static inline void ec_add(thread const uint x1[8], thread const uint y1[8],
     fe_sub(x1,x3,t);   fe_mul(lam,t,y3); fe_sub(y3,y1,y3);
 }
 
+/* ===================== kangaroo step kernel ===================== */
+struct KParams { uint njump; uint dpmask; uint steps; uint dpcap; };
+
+/* one kangaroo per thread; state in device memory; lean scratch (A,B,C). */
+kernel void kang_run(device uint* KX, device uint* KY, device uint* KD, device const uchar* KT,
+                     device const uint* JX, device const uint* JY, device const uint* JD,
+                     device uint* DPx, device uint* DPd, device uchar* DPt,
+                     device atomic_uint* DPcount,
+                     constant KParams& P, uint gid [[thread_position_in_grid]]){
+    uint x[8],y[8],d[8];
+    for(int i=0;i<8;i++){ x[i]=KX[gid*8+i]; y[i]=KY[gid*8+i]; d[i]=KD[gid*8+i]; }
+    uchar typ=KT[gid];
+
+    for(uint s=0;s<P.steps;s++){
+        uint idx = x[0] & (P.njump-1u);
+        uint A[8],B[8],C[8];
+        for(int i=0;i<8;i++) A[i]=JX[idx*8+i];     /* A = jx */
+        fe_sub(A,x,B);                              /* B = jx - x = den */
+        fe_inv(B,C);                                /* C = 1/den */
+        for(int i=0;i<8;i++) B[i]=JY[idx*8+i];      /* B = jy */
+        fe_sub(B,y,B);                              /* B = jy - y = num */
+        fe_mul(B,C,C);                              /* C = lam */
+        for(int i=0;i<8;i++) A[i]=JX[idx*8+i];      /* A = jx (reload) */
+        fe_sqr(C,B);                                /* B = lam^2 */
+        fe_sub(B,x,B);                              /* B = lam^2 - x */
+        fe_sub(B,A,B);                              /* B = x3 = lam^2 - x - jx */
+        fe_sub(x,B,A);                              /* A = x - x3 */
+        fe_mul(C,A,A);                              /* A = lam*(x-x3) */
+        fe_sub(A,y,A);                              /* A = y3 */
+        for(int i=0;i<8;i++){ x[i]=B[i]; y[i]=A[i]; }
+        /* dist += jump distance */
+        ulong carry=0;
+        for(int i=0;i<8;i++){ ulong cur=(ulong)d[i]+(ulong)JD[idx*8+i]+carry; d[i]=(uint)cur; carry=cur>>32; }
+        /* distinguished point? */
+        if((x[0] & P.dpmask)==0u){
+            uint slot=atomic_fetch_add_explicit(DPcount,1u,memory_order_relaxed);
+            if(slot<P.dpcap){
+                for(int i=0;i<8;i++){ DPx[slot*8+i]=x[i]; DPd[slot*8+i]=d[i]; }
+                DPt[slot]=typ;
+            }
+        }
+    }
+    for(int i=0;i<8;i++){ KX[gid*8+i]=x[i]; KY[gid*8+i]=y[i]; KD[gid*8+i]=d[i]; }
+}
+
+/* batch-inversion kangaroo: each thread owns KB kangaroos, ONE inverse per
+ * step amortised over all KB (Montgomery trick). Intermediates in device
+ * scratch (SDEN/SPRE) to keep register pressure low. */
+#define KB 16
+kernel void kang_batch(device uint* KX, device uint* KY, device uint* KD, device const uchar* KT,
+                       device const uint* JX, device const uint* JY, device const uint* JD,
+                       device uint* SDEN, device uint* SPRE,
+                       device uint* DPx, device uint* DPd, device uchar* DPt,
+                       device atomic_uint* DPcount,
+                       constant KParams& P, uint gid [[thread_position_in_grid]]){
+    uint baseK = gid*KB;
+    for(uint s=0;s<P.steps;s++){
+        /* ---- forward: dens + prefix products ---- */
+        uint running[8]; running[0]=1u; for(int i=1;i<8;i++) running[i]=0u;
+        for(int k=0;k<KB;k++){
+            uint x[8],A[8],den[8];
+            uint o=(baseK+k)*8;
+            for(int i=0;i<8;i++) x[i]=KX[o+i];
+            uint idx=x[0]&(P.njump-1u);
+            for(int i=0;i<8;i++) A[i]=JX[idx*8+i];
+            fe_sub(A,x,den);
+            for(int i=0;i<8;i++){ SDEN[o+i]=den[i]; SPRE[o+i]=running[i]; }
+            fe_mul(running,den,running);
+        }
+        /* ---- one inverse ---- */
+        uint inv[8]; fe_inv(running,inv);
+        /* ---- backward: per-kangaroo inverse + point update ---- */
+        for(int k=KB-1;k>=0;k--){
+            uint o=(baseK+k)*8;
+            uint s1[8],s2[8],s3[8],x[8],y[8],d[8];
+            for(int i=0;i<8;i++) s1[i]=SPRE[o+i];
+            fe_mul(inv,s1,s1);                 /* s1 = 1/den_k */
+            for(int i=0;i<8;i++) s2[i]=SDEN[o+i];
+            fe_mul(inv,s2,inv);                /* running inverse update */
+            for(int i=0;i<8;i++){ x[i]=KX[o+i]; y[i]=KY[o+i]; d[i]=KD[o+i]; }
+            uint idx=x[0]&(P.njump-1u);
+            for(int i=0;i<8;i++) s2[i]=JY[idx*8+i];
+            fe_sub(s2,y,s2);                   /* s2 = jy - y = num */
+            fe_mul(s2,s1,s1);                  /* s1 = lam */
+            fe_sqr(s1,s2);                     /* s2 = lam^2 */
+            fe_sub(s2,x,s2);                   /* s2 = lam^2 - x */
+            for(int i=0;i<8;i++) s3[i]=JX[idx*8+i];
+            fe_sub(s2,s3,s2);                  /* s2 = x3 */
+            fe_sub(x,s2,s3);                   /* s3 = x - x3 */
+            fe_mul(s1,s3,s3);                  /* s3 = lam*(x-x3) */
+            fe_sub(s3,y,s3);                   /* s3 = y3 */
+            ulong carry=0;
+            for(int i=0;i<8;i++){ ulong cur=(ulong)d[i]+(ulong)JD[idx*8+i]+carry; d[i]=(uint)cur; carry=cur>>32; }
+            for(int i=0;i<8;i++){ KX[o+i]=s2[i]; KY[o+i]=s3[i]; KD[o+i]=d[i]; }
+            if((s2[0]&P.dpmask)==0u){
+                uint slot=atomic_fetch_add_explicit(DPcount,1u,memory_order_relaxed);
+                if(slot<P.dpcap){ for(int i=0;i<8;i++){ DPx[slot*8+i]=s2[i]; DPd[slot*8+i]=d[i]; } DPt[slot]=KT[baseK+k]; }
+            }
+        }
+    }
+}
+
 kernel void test_ipmul(device const uint* A [[buffer(0)]],
                        device const uint* B [[buffer(1)]],
                        device uint*       O [[buffer(2)]],
