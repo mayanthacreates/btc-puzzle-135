@@ -27,27 +27,35 @@ funded as a public cryptographic challenge for anyone to solve. It is not a tool
 for attacking third-party wallets, and it provides no advantage against normal
 256-bit Bitcoin keys.
 
-Be realistic: a pure-CPU solver at ~80 million keys/sec **cannot** solve puzzle
-#135 (its 2^134 range needs ~2^67.5 operations - astronomically out of reach on
-any CPU; GPU pools are ~100x faster and still treat #135 as a long shot). The
-value here is a clean, native-Apple-Silicon kangaroo that you can read, trust,
-learn from, and use on the genuinely reachable (smaller) puzzles. MIT licensed.
+Be realistic: even at ~200 million keys/sec **this cannot** solve puzzle #135
+(its 2^134 range needs ~2^67.5 operations - astronomically out of reach on any
+personal machine; large NVIDIA GPU pools are far faster and still treat #135 as
+a long shot). The value here is a clean, native-Apple-Silicon CPU+GPU kangaroo
+that you can read, trust, learn from, and use on the genuinely reachable
+(smaller) puzzles. MIT licensed.
 
 ## What it is
-- Correct, validated secp256k1 field + group arithmetic (4×64 limbs, `__uint128_t`).
-  Verified against Python bignum (20k cases) and libsecp256k1 (scalar-mult +
-  point decompression, thousands of cases).
-- Kangaroo engine: tame + wild herds spread across the interval, Montgomery
-  **batch inversion** (one inversion amortised over 512 kangaroos/thread),
-  distinguished-point collision table, pthreads across all cores.
-- Proven to actually solve: recovers random 36/44/46/50/56-bit interval keys
-  end-to-end with exact match.
+- Correct, validated secp256k1 field + group arithmetic. CPU side (4×64 limbs,
+  `__uint128_t`) verified vs Python bignum + libsecp256k1; GPU side (Metal,
+  8×32 limbs) verified to match the CPU bit-for-bit over thousands of cases.
+- **Two engines, one net:** CPU pthreads and a Metal GPU kernel both walk
+  kangaroos (Montgomery batch inversion on each) into a single shared
+  distinguished-point table — a GPU tame can collide with a CPU wild.
+- Proven to actually solve: random 36–56-bit self-tests *and* the real solved
+  puzzle #40 (recovered the exact published key) end-to-end.
 
 ## Measured speed
-~**73–75 million jumps/sec** steady-state on the M4 (10 cores, ~7.4 Mj/s/core),
-using the canonical secp256k1 addition-chain inverse, batch size 512 (tuned to
-stay in L1), and LTO. This is the raw search rate and the honest ceiling of this
-hardware for this method.
+Both engines run together and share one distinguished-point net:
+
+| engine | rate |
+|---|---|
+| CPU (10 cores, batch-inverted jump loop) | ~80 M keys/s |
+| GPU (M4 Metal, 128 kangaroos/thread, batch inversion) | ~130 M keys/s |
+| **combined** | **~200+ M keys/s** |
+
+The GPU seeds its herds for ~8 s at startup before it kicks in (you'll see it
+go from 0 to ~130 in the dashboard). Run `NOGPU=1 ./kangaroo solve …` to force
+CPU-only.
 
 ## Setup on a new Mac (Apple Silicon)
 ```
@@ -120,8 +128,12 @@ implementation limit. The same binary will, however, efficiently solve the
 smaller (genuinely reachable) puzzles in the 50–80-bit range.
 
 ## Files
-- `field.h`   — Fp arithmetic
-- `group.h`   — EC group ops, pubkey decompression
-- `kangaroo.c`— solver (engine, DP table, threads)
-- `test_field.c` / `check_field.py` — field validation
-- `test_group.c` — group validation vs libsecp256k1
+- `field.h` / `group.h` — CPU Fp arithmetic + EC group ops, pubkey decompression
+- `kangaroo.c` — solver: CPU engine, shared DP table, threads, dashboard, GPU bridge
+- `gpu_field.metal` — Metal GPU kernels (field/EC arithmetic + kangaroo)
+- `gpu_driver.m` — GPU engine thread (seeds, launches, feeds the shared net)
+- `gpu_bridge.h` — C↔Metal interface
+- `test_field.c` / `check_field.py` — CPU field validation
+- `test_group.c` — CPU group validation vs libsecp256k1
+- `gpu_test.m` — GPU arithmetic validation vs CPU (`make check-gpu`)
+- `gpu_solve.m` — standalone GPU-only solver (benchmark/diagnostic)
