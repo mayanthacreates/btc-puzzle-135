@@ -18,7 +18,7 @@ static void fe_to_gpu(const fe*a,uint32_t*g){ for(int i=0;i<4;i++){ g[2*i]=(uint
 static void gpu_to_sc(const uint32_t*g,sc*a){ for(int i=0;i<4;i++) a->n[i]=((uint64_t)g[2*i])|(((uint64_t)g[2*i+1])<<32); }
 static void sc_to_gpu(const sc*a,uint32_t*g){ for(int i=0;i<4;i++){ g[2*i]=(uint32_t)a->n[i]; g[2*i+1]=(uint32_t)(a->n[i]>>32); } }
 
-#define KB 16
+#define KB 128
 typedef struct { uint32_t njump,dpmask,steps,dpcap; } KParams;
 
 /* ---- minimal host DP table ---- */
@@ -80,10 +80,12 @@ int main(int argc,char**argv){
     if(!lib){ printf("compile: %s\n",err.localizedDescription.UTF8String); return 1; }
     id<MTLComputePipelineState> pso=[dev newComputePipelineStateWithFunction:[lib newFunctionWithName:@"kang_batch"] error:&err];
     if(!pso){ printf("pipeline: %s\n",err.localizedDescription.UTF8String); return 1; }
+    fprintf(stderr,"[gpu] KB=%d maxThreadsPerThreadgroup=%lu execWidth=%lu\n",
+            KB,(unsigned long)pso.maxTotalThreadsPerThreadgroup,(unsigned long)pso.threadExecutionWidth);
     id<MTLCommandQueue> q=[dev newCommandQueue];
 
     int NJ=512;
-    int threads = (argc==2)? (1<<12) : (1<<14);   /* GPU threads; each owns KB kangaroos */
+    int threads = (argc==2)? (1<<9) : (1<<13);   /* GPU threads; each owns KB kangaroos */
     { const char*e=getenv("THREADS"); if(e) threads=atoi(e); }
     int N = threads*KB;                            /* total kangaroos */
     int half=N/2;
@@ -91,7 +93,7 @@ int main(int argc,char**argv){
     int lgN=0; { int t=N; while(t>1){lgN++;t>>=1;} }
     int dpbits = wbits/2 - lgN - 2; if(dpbits<1)dpbits=1; if(dpbits>24)dpbits=24;
     { const char*e=getenv("DPBITS"); if(e) dpbits=atoi(e); }
-    uint32_t dpcap = 1u<<21;
+    uint32_t dpcap = 1u<<23;
 
     /* ---- jump table on CPU ---- */
     ge G; ge_generator(&G);
@@ -165,7 +167,8 @@ int main(int argc,char**argv){
         [e setComputePipelineState:pso];
         id<MTLBuffer> bufs[]={bKX,bKY,bKD,bKT,bJX,bJY,bJD,bSDEN,bSPRE,bDPx,bDPd,bDPt,bDPc,bP};
         for(int i=0;i<14;i++) [e setBuffer:bufs[i] offset:0 atIndex:i];
-        [e dispatchThreads:MTLSizeMake(threads,1,1) threadsPerThreadgroup:MTLSizeMake(64,1,1)];
+        int tg=64; { const char*ev=getenv("TGSIZE"); if(ev) tg=atoi(ev); }
+        [e dispatchThreads:MTLSizeMake(threads,1,1) threadsPerThreadgroup:MTLSizeMake(tg,1,1)];
         [e endEncoding]; [cb commit]; [cb waitUntilCompleted];
         totaljumps += (uint64_t)N*steps;
 

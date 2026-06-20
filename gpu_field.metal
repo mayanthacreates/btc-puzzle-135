@@ -181,7 +181,7 @@ kernel void kang_run(device uint* KX, device uint* KY, device uint* KD, device c
 /* batch-inversion kangaroo: each thread owns KB kangaroos, ONE inverse per
  * step amortised over all KB (Montgomery trick). Intermediates in device
  * scratch (SDEN/SPRE) to keep register pressure low. */
-#define KB 16
+#define KB 128
 kernel void kang_batch(device uint* KX, device uint* KY, device uint* KD, device const uchar* KT,
                        device const uint* JX, device const uint* JY, device const uint* JD,
                        device uint* SDEN, device uint* SPRE,
