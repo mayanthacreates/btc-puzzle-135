@@ -5,9 +5,15 @@
 
 cd "$(dirname "$0")"
 
+# ============================================================================
+#  TO TARGET A DIFFERENT PUZZLE, edit these three lines.
+#  For puzzle N:  L = 2^(N-1),  R = 2^N - 1  (in hex). PUB = its public key.
+#  The puzzle must have an EXPOSED public key (its address has spent before).
+# ============================================================================
 PUB=02145d2611c823a396ef6712ce0f712f09b9b4f3135e3e0aa3230fb9b6d08d1e16
-L=4000000000000000000000000000000000          # 2^134
-R=7fffffffffffffffffffffffffffffffff          # 2^135 - 1
+L=4000000000000000000000000000000000          # 2^134      (puzzle 135 start)
+R=7fffffffffffffffffffffffffffffffff          # 2^135 - 1  (puzzle 135 end)
+# ============================================================================
 THREADS=${1:-10}                              # default: all 10 cores
 
 echo "Starting puzzle-135 kangaroo on $THREADS threads. Log: run-135.log"

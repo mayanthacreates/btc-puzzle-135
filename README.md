@@ -61,6 +61,27 @@ Puzzle 135 (convenience launcher, runs detached, logs to `run-135.log`):
 ```
 A found key is printed and written to `FOUND.txt` immediately.
 
+## Targeting a different puzzle
+This solver works on **any puzzle whose public key is exposed** (i.e. the address
+has spent at least once). You need three things: the compressed public key, and
+the key range.
+
+For puzzle number `N`, the range is always:
+```
+L = 2^(N-1)        R = 2^N - 1
+```
+e.g. puzzle 40 -> L=`8000000000`, R=`ffffffffff`; puzzle 135 -> L=`4000...000`
+(34 hex chars), R=`7fff...fff`.
+
+Easiest way: open `run-135.sh` and edit the three values at the top (`PUB`, `L`,
+`R`), then run it. Or call the binary directly:
+```
+./kangaroo solve <compressed_pubkey_hex> <Lhex> <Rhex> [threads]
+```
+Tip: to watch it actually *find* a key (proof it works), point it at a small,
+already-reachable puzzle, or run `./kangaroo selftest 50`. Larger puzzles like
+#135 run correctly but will not finish (see scope note above).
+
 Derive a compressed pubkey from a private key (for testing):
 ```
 ./kangaroo pub <privkey_hex>

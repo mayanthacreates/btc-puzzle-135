@@ -35,6 +35,15 @@ IF IT EVER FINDS THE KEY
    a file called  FOUND.txt  in this folder. You won't miss it.
 
 
+WANT A DIFFERENT PUZZLE?
+------------------------
+   Open  run-135.sh  in a text editor and change the 3 marked lines
+   (PUB, L, R) near the top. For puzzle number N:
+       L = 2 to the power (N-1)
+       R = 2 to the power N, minus 1
+   The puzzle must have a published public key. See README.md for detail.
+
+
 NOTES
 -----
 - Honest expectation: this runs correctly and fast, but puzzle 135 is
