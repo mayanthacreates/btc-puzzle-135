@@ -15,9 +15,15 @@ test_field: test_field.c field.h
 test_group: test_group.c group.h field.h
 	$(CC) $(CFLAGS) $(INC) -o test_group test_group.c $(LIB)
 
+gpu_test: gpu_test.m gpu_field.metal group.h field.h
+	$(CC) -O3 -fobjc-arc -framework Metal -framework Foundation -o gpu_test gpu_test.m
+
 check: test_field test_group
 	./test_field 5000 | python3 check_field.py
 	./test_group 3000
+
+check-gpu: gpu_test
+	./gpu_test 8192
 
 clean:
 	rm -f kangaroo test_field test_group

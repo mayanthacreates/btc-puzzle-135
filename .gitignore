@@ -2,6 +2,9 @@
 kangaroo
 test_field
 test_group
+gpu_test
+*.air
+*.metallib
 *.o
 *.dSYM/
 
