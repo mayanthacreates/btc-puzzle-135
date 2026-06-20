@@ -317,22 +317,19 @@ static void short_target(char*out,int n){
     char h[65]; fe_get_hex(&C.target.x,h);
     snprintf(out,n,"%.10s…%s",h,h+54);
 }
-static void dash_banner(void){
-    fprintf(stderr,"\n"
-      CG CB "    ╔═══════════════════════════════════════════════════╗\n" CR
-      CG CB "    ║   ▄▖▖   " CR CG "G R E E N R O O" CB "                          ║\n" CR
-      CG CB "    ║  ▐▌▌▌   " CR CGD "secp256k1 ECDLP kangaroo hunter" CB "        ║\n" CR
-      CG CB "    ║   ▘▝▘   " CR CGD "Apple Silicon · CPU + Metal GPU" CB "        ║\n" CR
-      CG CB "    ╚═══════════════════════════════════════════════════╝\n" CR "\n");
-}
-static int g_dash_lines=0;
 static int g_threads=0;
 static void bar(char*out,double v,double mx){
     int f=(mx>0)?(int)(12.0*v/mx+0.5):0; if(f>12)f=12; if(f<0)f=0;
     int k=0; for(int i=0;i<12;i++){ const char*c=(i<f)?"█":"░";
         out[k++]=c[0]; out[k++]=c[1]; out[k++]=c[2]; } out[k]=0;
 }
-static void dash_render(int tty,double el,double cpu_r,double gpu_r){
+/* plain one-line banner for non-TTY (log) output */
+static void dash_banner_plain(void){
+    fprintf(stderr,"\n GREENROO  -  secp256k1 ECDLP kangaroo  -  CPU + Metal GPU\n\n");
+}
+/* Full frame, anchored at top-left, clears each line + everything below.
+ * Resize-proof: no cursor-up math, no right borders to align. */
+static void dash_frame(double el,double cpu_r,double gpu_r){
     uint64_t total=C.total_jumps+C.gpu_jumps;
     double tot_r=cpu_r+gpu_r, mx=(cpu_r>gpu_r)?cpu_r:gpu_r;
     char tb[40],kb[40],tgt[64],cbar[40],gbar[40],groo[32];
@@ -340,28 +337,24 @@ static void dash_render(int tty,double el,double cpu_r,double gpu_r){
     bar(cbar,cpu_r,mx); bar(gbar,gpu_r,mx);
     if(C.gpu_kangaroos>0) snprintf(groo,sizeof groo,"%d roos",C.gpu_kangaroos);
     else                  snprintf(groo,sizeof groo,"seeding…");
-    if(!tty){
-        fprintf(stderr,"[%s] CPU %.0f + GPU %.0f = %.0f M/s | %s keys | net %llu\n",
-                tb,cpu_r,gpu_r,tot_r,kb,(unsigned long long)C.dp_count);
-        return;
-    }
-    if(g_dash_lines) fprintf(stderr,"\033[%dA",g_dash_lines);
-    int L=0;
-    #define DL(...) do{ fprintf(stderr,"\033[2K"); fprintf(stderr,__VA_ARGS__); fprintf(stderr,"\n"); L++; }while(0)
-    DL(CG CB "  ┌─ GREENROO ──────────────────── PUZZLE #%d ─┐" CR, C.wbits+1);
-    DL(CG "  │ " CR CD "target " CR CG "%s" CR, tgt);
-    DL(CG "  │ " CR CD "range  " CR CGD "2^%d … 2^%d-1" CR, C.wbits, C.wbits+1);
-    DL(CG "  │" CR);
-    DL(CG "  │ " CR CD "uptime " CR CB "%s" CR, tb);
-    DL(CG "  │ " CR "CPU " CD "%2d cores  " CR CB CG "%4.0f" CR " M/s " CGD "%s" CR, g_threads, cpu_r, cbar);
-    DL(CG "  │ " CR "GPU " CD "%-9s " CR CB CG "%4.0f" CR " M/s " CGD "%s" CR, groo, gpu_r, gbar);
-    DL(CG "  │" CR);
-    DL(CG "  │ " CR CB "TOTAL    " CR CB CG "%5.0f" CR CB " M keys/sec" CR, tot_r);
-    DL(CG "  │ " CR CD "checked  " CR "%s" , kb);
-    DL(CG "  │ " CR CD "DP net   " CR "%llu markers", (unsigned long long)C.dp_count);
-    DL(CG CB "  └────────────────────────────────────────────┘" CR);
+    fprintf(stderr,"\033[H");                 /* cursor to top-left */
+    #define DL(...) do{ fprintf(stderr,__VA_ARGS__); fprintf(stderr,"\033[K\n"); }while(0)
+    DL("");
+    DL(CG CB " ▌▌ GREENROO   " CR CGD "secp256k1 ECDLP kangaroo hunter" CR);
+    DL(CG CB " ▌▌            " CR CGD "Apple Silicon · CPU + Metal GPU" CR);
+    DL(CGD " ────────────────────────────────────────────" CR);
+    DL("  " CD "uptime  " CR CB "%s" CR "      " CGD "PUZZLE #%d" CR, tb, C.wbits+1);
+    DL("  " CD "target  " CR CG "%s" CR, tgt);
+    DL("  " CD "range   " CR CGD "2^%d … 2^%d-1" CR, C.wbits, C.wbits+1);
+    DL(CGD "  ──" CR);
+    DL("  " CG "CPU " CR CD "%2d cores  " CR CB CG "%4.0f" CR " M/s  " CGD "%s" CR, g_threads, cpu_r, cbar);
+    DL("  " CG "GPU " CR CD "%-9s " CR CB CG "%4.0f" CR " M/s  " CGD "%s" CR, groo, gpu_r, gbar);
+    DL(CGD "  ──" CR);
+    DL("  " CB "TOTAL   " CR CB CG "%5.0f" CR CB " M keys/sec" CR, tot_r);
+    DL("  " CD "checked " CR "%s", kb);
+    DL("  " CD "DP net  " CR "%llu markers", (unsigned long long)C.dp_count);
     #undef DL
-    g_dash_lines=L;
+    fprintf(stderr,"\033[0J");                /* clear anything below (old/wrapped) */
     fflush(stderr);
 }
 
@@ -375,8 +368,8 @@ static void run(int threads){
     for(int i=0;i<threads;i++) pthread_create(&th[i],NULL,worker,&ta[i]);
 
     int tty=isatty(2);
-    dash_banner();
-    if(tty) fprintf(stderr,"\033[?25l");        /* hide cursor */
+    if(tty) fprintf(stderr,"\033[2J\033[H\033[?25l");   /* clear screen, home, hide cursor */
+    else    dash_banner_plain();
 
     int tick=0; int ckpt_sec=120;
     { const char *e=getenv("CKPT_SEC"); if(e){ int v=atoi(e); if(v>0) ckpt_sec=v; } }
@@ -389,8 +382,12 @@ static void run(int threads){
         double dt=el-pel; if(dt<0.1)dt=1.0;
         double cr=(double)(cj-pc)/dt/1e6, gr=(double)(gj-pg)/dt/1e6;
         pc=cj; pg=gj; pel=el;
-        if(tty) dash_render(1,el,cr,gr);
-        else if(tick%10==0) dash_render(0,el,cr,gr);
+        if(tty) dash_frame(el,cr,gr);
+        else if(tick%10==0){
+            char tb[40],kb[40]; fmt_time(el,tb); fmt_count((double)(cj+gj),kb);
+            fprintf(stderr,"[%s] CPU %.0f + GPU %.0f = %.0f M/s | %s keys | net %llu\n",
+                    tb,cr,gr,cr+gr,kb,(unsigned long long)C.dp_count);
+        }
         if(C.do_ckpt && (++tick % ckpt_sec)==0) save_checkpoint();
         if(C.solved || C.stop_req) break;
     }
