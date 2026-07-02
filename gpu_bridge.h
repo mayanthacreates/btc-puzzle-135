@@ -14,6 +14,7 @@ int  bridge_solved(void);
 void bridge_add_jumps(uint64_t n);
 void bridge_set_kangaroos(int n);
 int  bridge_feed_dp(const uint32_t* x8, const uint32_t* d8, uint8_t type);
+uint64_t bridge_nonce(void);   /* per-run random value; decorrelates herd start points across restarts */
 
 /* implemented in gpu_driver.m, called by kangaroo.c */
 void* gpu_thread(void* arg);

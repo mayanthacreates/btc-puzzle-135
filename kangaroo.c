@@ -92,13 +92,24 @@ static void rand_sc_bits(sc *r, int bits, uint64_t *s){
 }
 
 /* ---------- DP table ---------- */
-/* returns 1 and fills *out_key if this insert produced a tame/wild collision */
+/* returns 1 and fills *out_key if this insert produced a tame/wild collision.
+ * Probing is bounded (not O(slots)): an unbounded linear scan under the
+ * global lock would freeze every thread once the table is near-full. At
+ * >=90% load we warn once and accept dropping rare DPs past the probe bound
+ * rather than degrade into a lock convoy. */
 static int dp_insert(const fe *x, const sc *dist, uint8_t type, sc *out_key){
     uint64_t h = (x->n[0]*0x9E3779B97F4A7C15ULL) ^ (x->n[2]*0xC2B2AE3D27D4EB4FULL);
     uint64_t i = h & C.mask;
     int found=0;
+    static volatile int warned_full = 0;
+    uint64_t maxprobe = (C.slots < 4096ULL) ? C.slots : 4096ULL;
     pthread_mutex_lock(&C.lock);
-    for(uint64_t probe=0; probe<C.slots; probe++){
+    if(!warned_full && C.dp_count >= (C.slots*9ULL)/10ULL){
+        warned_full = 1;
+        fprintf(stderr,"\n[DP table] >=90%% full (%llu/%llu slots) - further inserts may be dropped near-full; resize slots_log2\n",
+                (unsigned long long)C.dp_count,(unsigned long long)C.slots);
+    }
+    for(uint64_t probe=0; probe<maxprobe; probe++){
         uint64_t s=(i+probe)&C.mask;
         if(!C.used[s]){
             C.used[s]=1; C.dp_count++;
@@ -139,6 +150,14 @@ int  bridge_wbits(void){ return C.wbits; }
 int  bridge_solved(void){ return C.solved || C.stop_req; }
 void bridge_add_jumps(uint64_t n){ __sync_fetch_and_add(&C.gpu_jumps,n); }
 void bridge_set_kangaroos(int n){ C.gpu_kangaroos=n; }
+
+/* per-process random value, fixed once at startup. Both CPU (base_seed) and
+ * GPU (herd start-offset) mix this in so that a restart doesn't reseed every
+ * kangaroo at the exact same points and re-walk an identical path down to
+ * the next DP - it would still be found correctly, just re-derived for free
+ * for no reason. */
+static uint64_t g_nonce = 0;
+uint64_t bridge_nonce(void){ return g_nonce; }
 
 /* feed one GPU-found DP into the shared table; 1 if it solved */
 int bridge_feed_dp(const uint32_t*x8,const uint32_t*d8,uint8_t type){
@@ -368,7 +387,7 @@ static void dash_frame(double el,double cpu_r,double gpu_r){
 /* ---------- driver ---------- */
 static void run(int threads){
     pthread_t th[64]; targ_t ta[64];
-    uint64_t base_seed = 0xB5297A4D1F2E3C6BULL;
+    uint64_t base_seed = 0xB5297A4D1F2E3C6BULL ^ g_nonce;
     for(int i=0;i<threads;i++){ ta[i].id=i; ta[i].threads=threads; ta[i].seed=base_seed; }
     struct timespec t0; clock_gettime(CLOCK_MONOTONIC,&t0);
     g_threads=threads;
@@ -422,6 +441,7 @@ static int bitlen_sc(const sc *a){
 
 int main(int argc,char**argv){
     if(argc<2){ fprintf(stderr,"usage: selftest <bits> [threads] [dpbits] | solve <pub> <L> <R> [threads] [dpbits] [slots_log2]\n"); return 1; }
+    g_nonce = ((uint64_t)time(NULL) ^ ((uint64_t)getpid()<<32) ^ 0x9E3779B97F4A7C15ULL);
 
     if(!strcmp(argv[1],"pub")){          /* print compressed pubkey of a privkey hex */
         sc k; sc_set_hex(&k,argv[2]);

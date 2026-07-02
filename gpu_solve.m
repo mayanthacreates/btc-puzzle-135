@@ -8,10 +8,19 @@
 #include "group.h"
 
 /* ---- sc helpers ---- */
+static const uint64_t ORDER_N[4] = {
+    0xBFD25E8CD0364141ULL, 0xBAAEDCE6AF48A03BULL,
+    0xFFFFFFFFFFFFFFFEULL, 0xFFFFFFFFFFFFFFFFULL
+};
 static void sc_add(sc*r,const sc*a,const sc*b){ __uint128_t c=0;
     for(int i=0;i<4;i++){ __uint128_t t=(__uint128_t)a->n[i]+b->n[i]+c; r->n[i]=(uint64_t)t; c=t>>64; } }
-static void sc_sub(sc*r,const sc*a,const sc*b){ __uint128_t br=0;
-    for(int i=0;i<4;i++){ __uint128_t d=(__uint128_t)a->n[i]-b->n[i]-br; r->n[i]=(uint64_t)d; br=(d>>64)&1; } }
+/* r = (a-b) mod n */
+static void sc_sub(sc*r,const sc*a,const sc*b){
+    __uint128_t br=0; uint64_t t[4];
+    for(int i=0;i<4;i++){ __uint128_t d=(__uint128_t)a->n[i]-b->n[i]-br; t[i]=(uint64_t)d; br=(d>>64)&1; }
+    if(br){ __uint128_t c=0; for(int i=0;i<4;i++){ __uint128_t s=(__uint128_t)t[i]+ORDER_N[i]+c; t[i]=(uint64_t)s; c=s>>64; } }
+    r->n[0]=t[0]; r->n[1]=t[1]; r->n[2]=t[2]; r->n[3]=t[3];
+}
 
 /* ---- fe/sc <-> gpu (8x u32) ---- */
 static void fe_to_gpu(const fe*a,uint32_t*g){ for(int i=0;i<4;i++){ g[2*i]=(uint32_t)a->n[i]; g[2*i+1]=(uint32_t)(a->n[i]>>32); } }

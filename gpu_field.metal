@@ -106,18 +106,29 @@ static inline void fe_sqrn(thread const uint a[8], int n, thread uint r[8]){
     for(int i=0;i<n;i++) fe_sqr(t,t);
     for(int i=0;i<8;i++) r[i]=t[i];
 }
-/* inverse via Fermat a^(p-2). Small footprint (2 working arrays). */
-constant uint PM2[8]={0xFFFFFC2Du,0xFFFFFFFEu,0xFFFFFFFFu,0xFFFFFFFFu,
-                      0xFFFFFFFFu,0xFFFFFFFFu,0xFFFFFFFFu,0xFFFFFFFFu};
+/* inverse via the canonical secp256k1 addition chain (a^(p-2)).
+ * ~255 squarings + 15 muls, vs ~256 sqr + ~128 mul for Fermat's LSB loop.
+ * Mirrors field.h's fe_inv_fast; validated against it by gpu_test's test_inv. */
+static inline void fe_sqrn_(thread uint a[8], int n){ for(int i=0;i<n;i++) fe_sqr(a,a); }
 static inline void fe_inv(thread const uint a[8], thread uint r[8]){
-    uint result[8], base[8];
-    for(int i=0;i<8;i++){ result[i]=0u; base[i]=a[i]; }
-    result[0]=1u;
-    for(int i=0;i<256;i++){
-        if((PM2[i>>5]>>(i&31))&1u) fe_mul(result,base,result);
-        fe_sqr(base,base);
-    }
-    for(int i=0;i<8;i++) r[i]=result[i];
+    uint x2[8],x3[8],x6[8],x9[8],x11[8],x22[8],x44[8],x88[8],x176[8],x220[8],x223[8],t[8];
+    for(int i=0;i<8;i++) t[i]=a[i];
+    fe_sqr(t,x2);        fe_mul(x2,a,x2);
+    fe_sqr(x2,x3);       fe_mul(x3,a,x3);
+    for(int i=0;i<8;i++) x6[i]=x3[i]; fe_sqrn_(x6,3);   fe_mul(x6,x3,x6);
+    for(int i=0;i<8;i++) x9[i]=x6[i]; fe_sqrn_(x9,3);   fe_mul(x9,x3,x9);
+    for(int i=0;i<8;i++) x11[i]=x9[i]; fe_sqrn_(x11,2);  fe_mul(x11,x2,x11);
+    for(int i=0;i<8;i++) x22[i]=x11[i]; fe_sqrn_(x22,11); fe_mul(x22,x11,x22);
+    for(int i=0;i<8;i++) x44[i]=x22[i]; fe_sqrn_(x44,22); fe_mul(x44,x22,x44);
+    for(int i=0;i<8;i++) x88[i]=x44[i]; fe_sqrn_(x88,44); fe_mul(x88,x44,x88);
+    for(int i=0;i<8;i++) x176[i]=x88[i]; fe_sqrn_(x176,88); fe_mul(x176,x88,x176);
+    for(int i=0;i<8;i++) x220[i]=x176[i]; fe_sqrn_(x220,44); fe_mul(x220,x44,x220);
+    for(int i=0;i<8;i++) x223[i]=x220[i]; fe_sqrn_(x223,3);  fe_mul(x223,x3,x223);
+    for(int i=0;i<8;i++) t[i]=x223[i]; fe_sqrn_(t,23); fe_mul(t,x22,t);
+    fe_sqrn_(t,5); fe_mul(t,a,t);
+    fe_sqrn_(t,3); fe_mul(t,x2,t);
+    fe_sqrn_(t,2); fe_mul(t,a,t);
+    for(int i=0;i<8;i++) r[i]=t[i];
 }
 /* affine point add, P=(x1,y1) Q=(x2,y2), x1!=x2. out=(x3,y3) */
 static inline void ec_add(thread const uint x1[8], thread const uint y1[8],
@@ -180,7 +191,13 @@ kernel void kang_run(device uint* KX, device uint* KY, device uint* KD, device c
 
 /* batch-inversion kangaroo: each thread owns KB kangaroos, ONE inverse per
  * step amortised over all KB (Montgomery trick). Intermediates in device
- * scratch (SDEN/SPRE) to keep register pressure low. */
+ * scratch (SDEN/SPRE). An earlier revision moved this scratch into on-chip
+ * threadgroup memory, hoping to cut device-memory traffic; measured on this
+ * M4 (via gpu_solve, DPBITS pinned high to isolate kernel throughput from
+ * DP-drain cost) it was SLOWER at every KB that fits the real 32KB
+ * threadgroup budget (KB<=16: ~13 Mj/s) than this device-memory version at
+ * KB=128 (~19 Mj/s baseline, ~26 Mj/s with the addition-chain fe_inv below).
+ * Kept as device scratch; see git history for the threadgroup-memory attempt. */
 #define KB 128
 kernel void kang_batch(device uint* KX, device uint* KY, device uint* KD, device const uchar* KT,
                        device const uint* JX, device const uint* JY, device const uint* JD,
