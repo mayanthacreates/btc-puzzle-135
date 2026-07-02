@@ -147,12 +147,15 @@ int bridge_feed_dp(const uint32_t*x8,const uint32_t*d8,uint8_t type){
     if(dp_insert(&x,&dist,type,&q)){
         sc k; sc_add(&k,&C.rangeL,&q);
         ge T; ge_scalar_base(&T,&k);
+        fprintf(stderr,"\n[GPU COLLISION] cross-herd DP hit — verifying...\n");
         if(fe_equal(&T.x,&C.target.x)&&fe_equal(&T.y,&C.target.y)){
+            fprintf(stderr,"[GPU COLLISION] VERIFIED — key found!\n");
             pthread_mutex_lock(&C.lock);
             if(!C.solved){ C.solved=1; C.answer=k; }
             pthread_mutex_unlock(&C.lock);
             return 1;
         }
+        fprintf(stderr,"[GPU COLLISION] false positive (mismatch) — continuing\n");
     }
     return 0;
 }
@@ -240,10 +243,14 @@ static void *worker(void *arg){
                     /* q = k - L; recover k and verify k*G == target P */
                     sc k; sc_add(&k,&C.rangeL,&q);
                     ge T; ge_scalar_base(&T,&k);
+                    fprintf(stderr,"\n[COLLISION] cross-herd DP hit — verifying...\n");
                     if(fe_equal(&T.x,&C.target.x)&&fe_equal(&T.y,&C.target.y)){
+                        fprintf(stderr,"[COLLISION] VERIFIED — key found!\n");
                         pthread_mutex_lock(&C.lock);
                         if(!C.solved){ C.solved=1; C.answer=k; }
                         pthread_mutex_unlock(&C.lock);
+                    } else {
+                        fprintf(stderr,"[COLLISION] false positive (mismatch) — continuing\n");
                     }
                 }
             }
