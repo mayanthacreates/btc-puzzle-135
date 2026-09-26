@@ -1,5 +1,5 @@
 ==========================================================
-  PUZZLE-135 BOT  -  HOW TO USE  (Apple Silicon Mac)
+  PUZZLE-140 BOT  -  HOW TO USE  (Apple Silicon Mac)
 ==========================================================
 
 FIRST TIME ON THIS MAC
@@ -10,11 +10,11 @@ FIRST TIME ON THIS MAC
 
 EVERY DAY
 ---------
-2. Double-click:  START puzzle 135.command
+2. Double-click:  START puzzle 140.command
       -> the bot starts and shows live progress.
       -> you can close that window; it keeps running.
 
-3. Double-click:  STOP puzzle 135.command
+3. Double-click:  STOP puzzle 140.command
       -> stops the bot and saves progress.
       -> next START continues where it left off.
 
@@ -37,7 +37,7 @@ IF IT EVER FINDS THE KEY
 
 WANT A DIFFERENT PUZZLE?
 ------------------------
-   Open  run-135.sh  in a text editor and change the 3 marked lines
+   Open  run-140.sh  in a text editor and change the 3 marked lines
    (PUB, L, R) near the top. For puzzle number N:
        L = 2 to the power (N-1)
        R = 2 to the power N, minus 1
@@ -46,8 +46,8 @@ WANT A DIFFERENT PUZZLE?
 
 NOTES
 -----
-- Honest expectation: this runs correctly and fast, but puzzle 135 is
-  astronomically hard. The bot working is not the same as 135 being
+- Honest expectation: this runs correctly and fast, but puzzle 140 is
+  astronomically hard. The bot working is not the same as 140 being
   reachable. It will, however, solve smaller puzzles if pointed at them.
 - Progress is saved every 2 minutes (file: checkpoint.bin).
 - Each Mac runs its own separate search; progress does not sync.

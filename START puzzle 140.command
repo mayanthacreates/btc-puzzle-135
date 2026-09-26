@@ -4,9 +4,9 @@
 # every 2 minutes and resumes automatically next time you start.
 cd "$(dirname "$0")"
 
-PUB=02145d2611c823a396ef6712ce0f712f09b9b4f3135e3e0aa3230fb9b6d08d1e16
-L=4000000000000000000000000000000000          # 2^134
-R=7fffffffffffffffffffffffffffffffff          # 2^135 - 1
+PUB=031f6a332d3c5c4f2de2378c012f429cd109ba07d69690c6c701b6bb87860d6640
+L=80000000000000000000000000000000000          # 2^139
+R=fffffffffffffffffffffffffffffffffff          # 2^140 - 1
 
 clear
 exec ./kangaroo solve $PUB $L $R 10 25 26

@@ -10,7 +10,7 @@ Validated end-to-end on a real solved puzzle (#40 — recovered the exact
 published private key).
 
 ```
-  ┌─ GREENROO ──────────────────── PUZZLE #135 ─┐
+  ┌─ GREENROO ──────────────────── PUZZLE #140 ─┐
   │ uptime 13s
   │ CPU 10 cores     73 M/s ███████░░░░░
   │ GPU 524288 roos 133 M/s ████████████
@@ -27,9 +27,9 @@ funded as a public cryptographic challenge for anyone to solve. It is not a tool
 for attacking third-party wallets, and it provides no advantage against normal
 256-bit Bitcoin keys.
 
-Be realistic: even at ~200 million keys/sec **this cannot** solve puzzle #135
-(its 2^134 range needs ~2^67.5 operations - astronomically out of reach on any
-personal machine; large NVIDIA GPU pools are far faster and still treat #135 as
+Be realistic: even at ~200 million keys/sec **this cannot** solve puzzle #140
+(its 2^139 range needs ~2^70 operations - astronomically out of reach on any
+personal machine; large NVIDIA GPU pools are far faster and still treat #140 as
 a long shot). The value here is a clean, native-Apple-Silicon CPU+GPU kangaroo
 that you can read, trust, learn from, and use on the genuinely reachable
 (smaller) puzzles. MIT licensed.
@@ -80,9 +80,9 @@ Solve an arbitrary exposed-pubkey interval:
 ```
 ./kangaroo solve <compressed_pubkey_hex> <Lhex> <Rhex> [threads] [dpbits] [slots_log2]
 ```
-Puzzle 135 (convenience launcher, runs detached, logs to `run-135.log`):
+Puzzle 140 (convenience launcher, runs detached, logs to `run-140.log`):
 ```
-./run-135.sh
+./run-140.sh
 ```
 A found key is printed and written to `FOUND.txt` immediately.
 
@@ -95,17 +95,17 @@ For puzzle number `N`, the range is always:
 ```
 L = 2^(N-1)        R = 2^N - 1
 ```
-e.g. puzzle 40 -> L=`8000000000`, R=`ffffffffff`; puzzle 135 -> L=`4000...000`
-(34 hex chars), R=`7fff...fff`.
+e.g. puzzle 40 -> L=`8000000000`, R=`ffffffffff`; puzzle 140 -> L=`8000...000`
+(35 hex chars), R=`ffff...fff`.
 
-Easiest way: open `run-135.sh` and edit the three values at the top (`PUB`, `L`,
+Easiest way: open `run-140.sh` and edit the three values at the top (`PUB`, `L`,
 `R`), then run it. Or call the binary directly:
 ```
 ./kangaroo solve <compressed_pubkey_hex> <Lhex> <Rhex> [threads]
 ```
 Tip: to watch it actually *find* a key (proof it works), point it at a small,
 already-reachable puzzle, or run `./kangaroo selftest 50`. Larger puzzles like
-#135 run correctly but will not finish (see scope note above).
+#140 run correctly but will not finish (see scope note above).
 
 Derive a compressed pubkey from a private key (for testing):
 ```
@@ -119,9 +119,9 @@ In `solve` mode the distinguished-point table is saved to `checkpoint.bin` every
 target/range is ignored. Override the save interval with `CKPT_SEC=<seconds>`.
 So a reboot, crash, or `pkill` loses at most ~2 minutes of progress.
 
-## Honest expectation for #135
-The engine is correct and runs at full speed against the real #135 key. But the
-interval is 2^134 wide, so the expected work is ~2^67.5 jumps. At ~2^26 jumps/sec
+## Honest expectation for #140
+The engine is correct and runs at full speed against the real #140 key. But the
+interval is 2^139 wide, so the expected work is ~2^70 jumps. At ~2^26 jumps/sec
 this is on the order of 10^5–10^6 years on this machine. No CPU-only tuning
 changes that exponent — it is the proven generic-group lower bound, not an
 implementation limit. The same binary will, however, efficiently solve the

@@ -3,7 +3,7 @@
 cd "$(dirname "$0")"
 
 echo "=================================================="
-echo "   Setting up the Puzzle-135 bot on this Mac"
+echo "   Setting up the Puzzle-140 bot on this Mac"
 echo "=================================================="
 echo ""
 
@@ -42,7 +42,7 @@ fi
 echo ""
 echo "=================================================="
 echo "   Setup complete!"
-echo "   Now double-click:  START puzzle 135.command"
+echo "   Now double-click:  START puzzle 140.command"
 echo "=================================================="
 echo ""
 echo "Press any key to close."

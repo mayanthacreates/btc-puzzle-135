@@ -13,5 +13,5 @@ gpu_solve
 checkpoint.bin
 checkpoint.tmp
 FOUND.txt
-run-135.log
-run-135.pid
+run-140.log
+run-140.pid
